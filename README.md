@@ -6,6 +6,6 @@ multiple-choice, free-recall and predict questions with KaTeX maths, a confidenc
 (0 / 30 / 50 / 70 / 90 / 100) and a "what were you thinking?" box. The answer is sent back to the
 chat as one line. `TutorCard.plan` draws a lesson plan tree; `TutorCard.panel` a teaching panel.
 
-    https://cdn.jsdelivr.net/gh/User183635282/tutor-cards@v1.0.0/tutor-card.js
+    https://cdn.jsdelivr.net/gh/User183635282/tutor-cards@v1.1.0/tutor-card.js
 
 No dependencies except KaTeX 0.16.9, loaded from cdnjs.

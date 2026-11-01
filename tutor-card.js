@@ -1,4 +1,4 @@
-/* tutor-card.js v1.0.0 - question cards for the tutor skill (SPEC section 6). ASCII only.
+/* tutor-card.js v1.1.0 - question cards for the tutor skill (SPEC section 6). ASCII only.
    TutorCard.render(el, SPEC) | .plan(el, PLAN) | .panel(el, {html|text, title}) | .ready()  Needs the host CSS variables. */
 (function (g) {
   'use strict';
@@ -92,6 +92,51 @@
   }
   function clean(s) { return String(s || '').replace(/\|/g, '/').replace(/\s*\r?\n\s*/g, ' / ').trim(); }
 
+  /* Drafts: what is typed (and chosen) is saved as it changes, so a re-render of the widget does not wipe it.
+     Storage can throw (sandboxed frame, blocked site data), so every call is guarded and a copy lives in memory too. */
+  var DP = 'tc-draft:', DAGE = 7 * 864e5, MEM = g.__tcDrafts || (g.__tcDrafts = {});
+  function hash(str) {
+    var a = 2166136261, i;
+    for (i = 0; i < str.length; i++) { a ^= str.charCodeAt(i); a = Math.imul(a, 16777619); }
+    return (a >>> 0).toString(36);
+  }
+  /* qid repeats from one session to the next, so the key adds the session id when the spec has one, and a hash of the question */
+  function draftKey(s, qid) {
+    var body = [s.concept, s.panel, s.prompt].concat((s.options || []).map(function (o) { return o.id + o.text; })).join('\u0001');
+    return DP + (s.sid ? s.sid + ':' : '') + qid + ':' + hash(body);
+  }
+  function stores() {
+    var out = [];
+    ['localStorage', 'sessionStorage'].forEach(function (n) { try { if (g[n]) out.push(g[n]); } catch (e) { /* blocked */ } });
+    return out;
+  }
+  function draftGet(key) {
+    var raw = null;
+    stores().some(function (S) { try { raw = S.getItem(key); } catch (e) { raw = null; } return !!raw; });
+    try { return raw ? JSON.parse(raw) : (MEM[key] || null); } catch (e) { return MEM[key] || null; }
+  }
+  function draftPut(key, d) {
+    var raw = JSON.stringify(d);
+    MEM[key] = d;
+    stores().some(function (S) { try { S.setItem(key, raw); return true; } catch (e) { return false; } });
+  }
+  function draftDrop(key) {
+    delete MEM[key];
+    stores().forEach(function (S) { try { S.removeItem(key); } catch (e) { /* blocked */ } });
+  }
+  function draftPrune() {
+    stores().forEach(function (S) {
+      try {
+        var k = [], i, d;
+        for (i = 0; i < S.length; i++) if (S.key(i).indexOf(DP) === 0) k.push(S.key(i));
+        k.forEach(function (n) {
+          try { d = JSON.parse(S.getItem(n)); } catch (e) { d = null; }
+          if (!d || !(Date.now() - d.ts < DAGE)) S.removeItem(n);
+        });
+      } catch (e) { /* blocked */ }
+    });
+  }
+
   function render(el, s) {
     start(el);
     var kind = s.kind || 'choice', isC = kind === 'choice', qid = String(s.qid), st = { opt: null, conf: null, idk: false, sent: false };
@@ -150,6 +195,32 @@
     var btn = h('button', { class: 'tc-send', type: 'button', text: 'Send' });
     root.appendChild(h('div', { class: 'tc-ft' }, [btn, err]));
 
+    /* save on every change; restore once the boxes exist */
+    var dkey = draftKey(s, qid);
+    function save() {
+      if (st.sent) return;
+      var d = { ts: Date.now(), a: ta ? ta.value : '', t: think.value, r: read ? read.value : '', o: st.opt ? st.opt.id : null, c: st.conf, i: st.idk };
+      if (!d.a && !d.t && !d.r && d.o == null && d.c == null && !d.i) draftDrop(dkey); else draftPut(dkey, d);
+    }
+    ['input', 'change', 'pointerup', 'keyup'].forEach(function (ev) { root.addEventListener(ev, save); });
+    function fire(x, ev) { x.dispatchEvent(new Event(ev, { bubbles: true })); }
+    (function restore() {
+      var d = draftGet(dkey);
+      if (!d) return;
+      if (ta && d.a) ta.value = d.a;
+      if (d.t) think.value = d.t;
+      if (read && d.r) read.value = d.r;
+      if (isC && d.o != null) {
+        [].some.call(root.querySelectorAll('input[data-id]'), function (x) {
+          if (x.getAttribute('data-id') !== d.o) return false;
+          x.checked = true; fire(x, 'change'); return true;
+        });
+      }
+      if (!isC && d.i) { idk.checked = true; fire(idk, 'change'); }
+      if (d.c != null && d.c >= 0 && d.c <= 5) { sl.value = d.c; setConf(); }
+    })();
+    draftPrune();
+
     function problem() {
       if (isC && !st.opt) return 'Choose an answer, or "I don\'t know".';
       if (!isC && !st.idk && !clean(ta.value)) return 'Write ' + (kind === 'predict' ? 'a guess' : 'an answer') + ', or tick "I don\'t know".';
@@ -173,6 +244,7 @@
       var ok = false;
       try { if (typeof g.sendPrompt === 'function') { g.sendPrompt(msg); ok = true; } } catch (e) { ok = false; }
       btn.textContent = ok ? 'Sent' : 'Not sent';
+      if (ok) draftDrop(dkey);
       if (!ok) {
         root.appendChild(h('div', { class: 'tc-note', text: 'No chat link here. Copy this line into the chat:' }));
         root.appendChild(h('pre', { class: 'tc-copy', text: msg }));
@@ -246,5 +318,5 @@
     return box;
   }
 
-  g.TutorCard = { version: '1.0.0', stops: STOPS, render: render, plan: plan, panel: panel, ready: ready };
+  g.TutorCard = { version: '1.1.0', stops: STOPS, render: render, plan: plan, panel: panel, ready: ready };
 })(window);
